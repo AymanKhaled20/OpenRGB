@@ -1,0 +1,60 @@
+# Pulse fork CI: builds the headless OpenRGB Windows backend.
+# Consumed by Pulse-HWM as a hidden daemon (documented SDK protocol on
+# loopback). Patches carried on this branch: loopback-only server bind.
+name: windows-headless-build
+
+on:
+  push:
+    branches: [pulse-headless]
+  workflow_dispatch:
+
+jobs:
+  build-windows-64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Qt 6.8.3 (OpenRGB-Qt-Packages) + jom
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\Qt\6.8.3, C:\Qt\jom | Out-Null
+          $base = 'https://gitlab.com/OpenRGBDevelopers/OpenRGB-Qt-Packages/-/raw/master'
+          foreach ($f in @('qt-6.8.3-base-tools-core5compat-msvc2022.7z',
+                           'qt-6.8.3-base-tools-core5compat-msvc2022-64.7z')) {
+            Invoke-WebRequest "$base/$f" -OutFile "$env:RUNNER_TEMP\$f"
+            & 'C:\Program Files\7-Zip\7z.exe' x "$env:RUNNER_TEMP\$f" -oC:\Qt\6.8.3 -y | Out-Null
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Invoke-WebRequest "$base/jom.zip" -OutFile "$env:RUNNER_TEMP\jom.zip"
+          & 'C:\Program Files\7-Zip\7z.exe' x "$env:RUNNER_TEMP\jom.zip" -oC:\Qt\jom -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build (qmake + jom)
+        shell: cmd
+        run: |
+          set QT_PATH=_64
+          set PATH=C:\Qt\6.8.3\msvc2022_64\bin;C:\Qt\jom;%PATH%
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSROOT=%%i
+          call "%VSROOT%\VC\Auxiliary\Build\vcvarsall.bat" x64 || exit /b 1
+          qmake OpenRGB.pro CONFIG-=debug_and_release CONFIG+=release || exit /b 1
+          jom -j%NUMBER_OF_PROCESSORS% || exit /b 1
+          windeployqt --no-patchqt --no-quick-import --no-translations --no-system-d3d-compiler --no-compiler-runtime --no-opengl-sw --no-network release\OpenRGB.exe || exit /b 1
+
+      - name: Smoke-test headless server
+        shell: pwsh
+        run: |
+          Start-Process -FilePath ".\release\OpenRGB.exe" -ArgumentList '--server' -PassThru | ForEach-Object {
+            Start-Sleep -Seconds 25
+            $c = Test-NetConnection -ComputerName 127.0.0.1 -Port 6742 -WarningAction SilentlyContinue
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            if (-not $c.TcpTestSucceeded) { Write-Error 'SDK server did not listen on 127.0.0.1:6742'; exit 1 }
+          }
+          Write-Host 'Headless server OK on 127.0.0.1:6742'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openrgb-headless-win64
+          path: release
+          if-no-files-found: error
