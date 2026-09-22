@@ -271,7 +271,10 @@ bool net_port::tcp_server(const char * port)
     port = strtok((char *)port, "\r");
 
     myAddress.sin_family = AF_INET;
-    myAddress.sin_addr.s_addr = inet_addr("0.0.0.0");
+    /* Pulse fork: bind the SDK server to loopback only. The SDK protocol
+       has no authentication, and the default 0.0.0.0 exposed it to the
+       whole LAN. Pulse-HWM always runs this server on the same machine. */
+    myAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
     myAddress.sin_port = htons(atoi(port));
 
     /*-------------------------------------------------*\
