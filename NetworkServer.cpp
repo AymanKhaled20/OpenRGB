@@ -1100,26 +1100,40 @@ void NetworkServer::ControllerListenThread(NetworkServerControllerThread* this_t
 
                 controller_ids_mutex.lock_shared();
 
+                /*-----------------------------------------*\
+                | Protocol < 6 clients address controllers  |
+                | by INDEX; index_from_id() treats the value|
+                | as an index for them. Passing the thread's|
+                | unique ID broke every queued packet from  |
+                | those clients once a rescan or hotplug    |
+                | made IDs and indexes diverge (updates     |
+                | were dropped as INVALID_ID, or routed to  |
+                | the wrong controller). Read the index     |
+                | under controller_ids_mutex: SetControllers|
+                | renumbers it while holding that lock.     |
+                \*-----------------------------------------*/
+                unsigned int controller_ref = (queue_entry.client_info->client_protocol_version >= 6) ? this_thread->id : this_thread->index;
+
                 switch(queue_entry.header.pkt_id)
                 {
                     case NET_PACKET_ID_RGBCONTROLLER_UPDATELEDS:
-                        status = ProcessRequest_RGBController_UpdateLEDs(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, this_thread->id);
+                        status = ProcessRequest_RGBController_UpdateLEDs(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, controller_ref);
                         break;
 
                     case NET_PACKET_ID_RGBCONTROLLER_UPDATEZONELEDS:
-                        status = ProcessRequest_RGBController_UpdateZoneLEDs(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, this_thread->id);
+                        status = ProcessRequest_RGBController_UpdateZoneLEDs(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, controller_ref);
                         break;
 
                     case NET_PACKET_ID_RGBCONTROLLER_UPDATEMODE:
-                        status = ProcessRequest_RGBController_UpdateSaveMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, this_thread->id, false);
+                        status = ProcessRequest_RGBController_UpdateSaveMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, controller_ref, false);
                         break;
 
                     case NET_PACKET_ID_RGBCONTROLLER_SAVEMODE:
-                        status = ProcessRequest_RGBController_UpdateSaveMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, this_thread->id, true);
+                        status = ProcessRequest_RGBController_UpdateSaveMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, controller_ref, true);
                         break;
 
                     case NET_PACKET_ID_RGBCONTROLLER_UPDATEZONEMODE:
-                        status = ProcessRequest_RGBController_UpdateZoneMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, this_thread->id);
+                        status = ProcessRequest_RGBController_UpdateZoneMode(queue_entry.client_info, queue_entry.header.pkt_size, queue_entry.data, controller_ref);
                         break;
 
                     default:
